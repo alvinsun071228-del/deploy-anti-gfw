@@ -45,8 +45,8 @@ SNI="${SNI:-www.microsoft.com}"
 NODE_NAME="${NODE_NAME:-}"
 ENABLE_HY2="${ENABLE_HY2:-0}"
 if [[ -z "$NODE_NAME" ]]; then
-  # /dev/tty so the prompt works even when stdin is a pipe (the oneliner path)
-  read -r -p "Node name (e.g. Taiwan / Tokyo / HongKong): " NODE_NAME </dev/tty 2>/dev/null || true
+  # prompt only when stdin is a terminal (works for `bash <(curl ...)`; pipes skip silently)
+  [[ -t 0 ]] && read -r -p "Node name (e.g. Taiwan / Tokyo / HongKong): " NODE_NAME
 fi
 NODE_NAME="$(printf '%s' "${NODE_NAME:-Tokyo}" | tr ' ' '-')"   # URL-safe label
 
