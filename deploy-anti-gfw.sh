@@ -23,7 +23,7 @@
 #
 # You can override the defaults via environment variables:
 #   REALITY_PORT  (443)   ANYTLS_PORT  (8443)   SUB_PORT  (28443)
-#   SNI           (www.microsoft.com)          CAP_GB     (2000)
+#   SNI           (www.lovelive-anime.jp)          CAP_GB     (2000)
 #   NODE_NAME     (Tokyo)
 #
 # NOTE: the OS firewall rules below are set automatically, but the **cloud**
@@ -41,7 +41,7 @@ REALITY_PORT="${REALITY_PORT:-443}"
 ANYTLS_PORT="${ANYTLS_PORT:-8443}"
 SUB_PORT="${SUB_PORT:-28443}"
 CAP_GB="${CAP_GB:-2000}"
-SNI="${SNI:-www.microsoft.com}"
+SNI="${SNI:-www.lovelive-anime.jp}"
 NODE_NAME="${NODE_NAME:-}"
 ENABLE_HY2="${ENABLE_HY2:-0}"
 if [[ -z "$NODE_NAME" ]]; then
