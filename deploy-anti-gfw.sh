@@ -121,11 +121,14 @@ systemctl daemon-reload
 # 2. Xray — VLESS + Vision + REALITY on TCP 443
 # ---------------------------------------------------------------------------
 log "installing Xray (Reality)"
-if ! command -v xray >/dev/null; then
+# xray.service (systemd unit) can go missing while the binary survives a partial
+# cleanup — re-run the official installer (idempotent) whenever either is absent.
+if ! command -v xray >/dev/null || ! systemctl cat xray.service >/dev/null 2>&1; then
   bash -c "$(curl -fsSL https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install >/dev/null \
     || die "Xray install script download/execution failed"
 fi
 command -v xray >/dev/null || die "xray binary not found after install"
+systemctl cat xray.service >/dev/null 2>&1 || die "xray.service missing even after install"
 UUID="$(xray uuid)"
 KPAIR="$(xray x25519)"
 # xray >= 1.8.6 prints "Private key: / Public key:", xray >= 25 prints
