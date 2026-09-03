@@ -132,7 +132,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/alvinsun071228-del/deploy-an
 | `SUB_PORT` | `28443` | 订阅 / 仪表盘端口 |
 | `SNI` | `www.microsoft.com` | REALITY 伪装的目标网站 |
 | `CAP_GB` | `2000` | 每月流量上限(GB),仪表盘和订阅流量条按它算 |
-| `NODE_NAME` | `Tokyo` | 节点显示名称 |
+| `NODE_NAME` | 交互式询问 | 节点显示名称(不设环境变量时会先问你要,直接回车则用 `Tokyo`) |
 | `ENABLE_HY2` | `0` | 设为 `1` 时额外安装 Hysteria2 |
 
 示例:

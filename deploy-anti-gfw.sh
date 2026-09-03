@@ -42,9 +42,12 @@ ANYTLS_PORT="${ANYTLS_PORT:-8443}"
 SUB_PORT="${SUB_PORT:-28443}"
 CAP_GB="${CAP_GB:-2000}"
 SNI="${SNI:-www.microsoft.com}"
-NODE_NAME="${NODE_NAME:-Tokyo}"
+NODE_NAME="${NODE_NAME:-}"
 ENABLE_HY2="${ENABLE_HY2:-0}"
-NODE_NAME="$(printf '%s' "$NODE_NAME" | tr ' ' '-')"   # URL-safe label
+if [[ -z "$NODE_NAME" ]]; then
+  read -r -p "Node name (e.g. Taiwan / Tokyo / HongKong): " NODE_NAME || true
+fi
+NODE_NAME="$(printf '%s' "${NODE_NAME:-Tokyo}" | tr ' ' '-')"   # URL-safe label
 
 # ---------------------------------------------------------------------------
 # helpers
