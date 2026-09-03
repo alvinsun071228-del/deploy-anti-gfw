@@ -45,7 +45,8 @@ SNI="${SNI:-www.microsoft.com}"
 NODE_NAME="${NODE_NAME:-}"
 ENABLE_HY2="${ENABLE_HY2:-0}"
 if [[ -z "$NODE_NAME" ]]; then
-  read -r -p "Node name (e.g. Taiwan / Tokyo / HongKong): " NODE_NAME || true
+  # /dev/tty so the prompt works even when stdin is a pipe (the oneliner path)
+  read -r -p "Node name (e.g. Taiwan / Tokyo / HongKong): " NODE_NAME </dev/tty 2>/dev/null || true
 fi
 NODE_NAME="$(printf '%s' "${NODE_NAME:-Tokyo}" | tr ' ' '-')"   # URL-safe label
 
@@ -66,6 +67,7 @@ command -v ufw     >/dev/null || true
 # public IP + primary interface (for the traffic dashboard)
 PUB_IP="$(curl -fsSL --max-time 10 https://api.ipify.org 2>/dev/null \
          || curl -fsSL --max-time 10 https://ifconfig.me 2>/dev/null \
+         || curl -fsSL --max-time 10 https://icanhazip.com 2>/dev/null \
          || echo '')"
 IFACE="$(ip route show default 2>/dev/null | awk '{print $5; exit}')"
 IFACE="${IFACE:-eth0}"
@@ -97,8 +99,8 @@ cat > /usr/local/sbin/net-tune.sh <<EOF
 #!/bin/bash
 R=\$(ip route show default | head -1)
 echo "\$R" | grep -q initcwnd || ip route replace \$R initcwnd 30 initrwnd 30
-iptables -t mangle -C OUTPUT -p tcp -m multiport --sports ${REALITY_PORT},${ANYTLS_PORT} --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null \
- || iptables -t mangle -A OUTPUT -p tcp -m multiport --sports ${REALITY_PORT},${ANYTLS_PORT} --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+iptables -t mangle -D OUTPUT -p tcp -m multiport --sports ${REALITY_PORT},${ANYTLS_PORT} --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
+iptables -t mangle -A OUTPUT -p tcp -m multiport --sports ${REALITY_PORT},${ANYTLS_PORT} --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
 EOF
 chmod +x /usr/local/sbin/net-tune.sh
 cat > /etc/systemd/system/net-tune.service <<'EOF'
@@ -113,14 +115,17 @@ RemainAfterExit=yes
 WantedBy=multi-user.target
 EOF
 systemctl enable --now net-tune.service >/dev/null
+systemctl daemon-reload
 
 # ---------------------------------------------------------------------------
 # 2. Xray — VLESS + Vision + REALITY on TCP 443
 # ---------------------------------------------------------------------------
 log "installing Xray (Reality)"
 if ! command -v xray >/dev/null; then
-  bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install >/dev/null
+  bash -c "$(curl -fsSL https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install >/dev/null \
+    || die "Xray install script download/execution failed"
 fi
+command -v xray >/dev/null || die "xray binary not found after install"
 UUID="$(xray uuid)"
 KPAIR="$(xray x25519)"
 # xray >= 1.8.6 prints "Private key: / Public key:", xray >= 25 prints
@@ -141,6 +146,8 @@ cat > /usr/local/etc/xray/config.json <<EOF
   "outbounds": [ { "protocol": "freedom" }, { "protocol": "blackhole", "tag": "block" } ],
   "routing": { "rules": [ { "type": "field", "protocol": ["bittorrent"], "outboundTag": "block" } ] } }
 EOF
+xray run -test -config /usr/local/etc/xray/config.json >/dev/null 2>&1 \
+  || { warn "xray config failed validation (dumping for debug)"; cat /usr/local/etc/xray/config.json; die "xray config invalid"; }
 systemctl enable --now xray >/dev/null
 systemctl restart xray
 
@@ -149,11 +156,21 @@ systemctl restart xray
 # ---------------------------------------------------------------------------
 log "installing sing-box (AnyTLS)"
 if ! command -v sing-box >/dev/null; then
-  TAG="$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest | grep -m1 tag_name | cut -d'"' -f4)"
+  case "$(uname -m)" in
+    x86_64|amd64)  SB_ARCH="amd64" ;;
+    aarch64|arm64) SB_ARCH="arm64" ;;
+    *) die "unsupported architecture: $(uname -m)" ;;
+  esac
+  TAG="$(curl -fsSL --max-time 30 https://api.github.com/repos/SagerNet/sing-box/releases/latest \
+         | grep -m1 '"tag_name"' | cut -d'"' -f4)"
+  [[ -n "$TAG" ]] || die "failed to query latest sing-box release (GitHub API)"
   VER="${TAG#v}"
-  curl -sL "https://github.com/SagerNet/sing-box/releases/download/${TAG}/sing-box-${VER}-linux-amd64.tar.gz" | tar xz -C /tmp
-  install /tmp/sing-box-${VER}-linux-amd64/sing-box /usr/local/bin/sing-box
+  curl -fsSL "https://github.com/SagerNet/sing-box/releases/download/${TAG}/sing-box-${VER}-linux-${SB_ARCH}.tar.gz" \
+    | tar xz -C /tmp || die "failed to download sing-box ${TAG}"
+  install "/tmp/sing-box-${VER}-linux-${SB_ARCH}/sing-box" /usr/local/bin/sing-box \
+    || die "failed to install sing-box binary"
 fi
+command -v sing-box >/dev/null || die "sing-box binary not found"
 mkdir -p /etc/sing-box
 ANYTLS_PW="$(openssl rand -base64 24 | tr -d '=+/' | cut -c1-32)"
 openssl req -x509 -nodes -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
@@ -166,10 +183,13 @@ cat > /etc/sing-box/config.json <<EOF
       "certificate_path":"/etc/sing-box/cert.pem","key_path":"/etc/sing-box/key.pem"} }],
   "outbounds": [{"type":"direct"}] }
 EOF
+sing-box check -c /etc/sing-box/config.json >/dev/null 2>&1 \
+  || { warn "sing-box config failed validation (dumping for debug)"; cat /etc/sing-box/config.json; die "sing-box config invalid"; }
 cat > /etc/systemd/system/sing-box.service <<'EOF'
 [Unit]
 Description=sing-box service
-After=network.target
+After=network-online.target
+Wants=network-online.target
 [Service]
 ExecStart=/usr/local/bin/sing-box run -c /etc/sing-box/config.json
 Restart=on-failure
@@ -278,11 +298,14 @@ if [[ "$ENABLE_HY2" == "1" ]]; then
 EOF
 fi
 
+GROUP_NODES="\"${NODE_NAME}-Reality\", \"${NODE_NAME}-AnyTLS\""
+[[ "$ENABLE_HY2" == "1" ]] && GROUP_NODES="${GROUP_NODES}, \"${NODE_NAME}-Hy2\""
+
 cat >> /etc/stash-sub/config.yaml <<EOF
 
 proxy-groups:
-  - { name: Proxy, type: select, proxies: ["${NODE_NAME}-Reality", "${NODE_NAME}-AnyTLS"] }
-  - { name: AI,    type: select, proxies: ["${NODE_NAME}-Reality", "${NODE_NAME}-AnyTLS"] }
+  - { name: Proxy, type: select, proxies: [${GROUP_NODES}] }
+  - { name: AI,    type: select, proxies: [${GROUP_NODES}] }
 
 rules:
   # WeChat / QQ  (force-direct, above everything else)
@@ -309,6 +332,13 @@ dns:
   enable: true
   enhanced-mode: fake-ip
   fake-ip-range: 198.18.0.0/15
+  fake-ip-filter:
+    - '*.ntp.org'
+    - 'time.apple.com'
+    - 'time.windows.com'
+    - '*.pool.ntp.org'
+    - 'stun.*'
+    - '*.lan'
   default-nameserver: [223.5.5.5, 119.29.29.29]
   nameserver-policy:
     'geosite:cn': https://dns.alidns.com/dns-query
@@ -336,8 +366,9 @@ def usage():
     brx, btx = _boot_bytes()
     vrx = vtx = trx = ttx = 0
     try:
-        f = subprocess.run(["vnstat", "--oneline", "b"], capture_output=True,
-                           text=True, timeout=5).stdout.strip().split(";")
+        f = subprocess.run(["vnstat", "--oneline", "b"], stdout=subprocess.PIPE,
+                           stderr=subprocess.DEVNULL, universal_newlines=True,
+                           timeout=5).stdout.strip().split(";")
         if len(f) >= 15:
             vrx, vtx, trx, ttx = int(f[8]), int(f[9]), int(f[3]), int(f[4])
     except Exception:
@@ -410,7 +441,8 @@ chmod +x /usr/local/sbin/traffic-dashboard.py
 cat > /etc/systemd/system/stash-sub.service <<'EOF'
 [Unit]
 Description=traffic dashboard + subscription
-After=network.target
+After=network-online.target
+Wants=network-online.target
 [Service]
 ExecStart=/usr/bin/python3 /usr/local/sbin/traffic-dashboard.py
 Restart=on-failure
