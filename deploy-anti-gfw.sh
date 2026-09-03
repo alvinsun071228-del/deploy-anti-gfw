@@ -135,6 +135,7 @@ PBK="$(printf '%s\n' "$KPAIR" | sed -nE 's/^(Public ?key|Password \(PublicKey\))
 SID="$(openssl rand -hex 8)"
 [[ -n "$PRIV" && -n "$PBK" ]] || die "failed to parse 'xray x25519' output"
 
+mkdir -p /usr/local/etc/xray
 cat > /usr/local/etc/xray/config.json <<EOF
 { "log": { "loglevel": "none" },
   "inbounds": [{ "listen": "::", "port": ${REALITY_PORT}, "protocol": "vless",
@@ -428,7 +429,12 @@ class H(http.server.BaseHTTPRequestHandler):
         pass
 
 if __name__ == "__main__":
-    http.server.HTTPServer(("0.0.0.0", PORT), H).serve_forever()
+    import socket
+    httpd_cls = getattr(http.server, "ThreadingHTTPServer", http.server.HTTPServer)
+    httpd = httpd_cls(("0.0.0.0", PORT), H)
+    httpd.daemon_threads = True
+    httpd.socket.settimeout(20)   # drop half-open/stuck clients so they can't wedge the service
+    httpd.serve_forever()
 PYEOF
 
 # patch the dashboard constants to the values we actually generated
