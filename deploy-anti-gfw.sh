@@ -120,8 +120,10 @@ if ! command -v xray >/dev/null; then
 fi
 UUID="$(xray uuid)"
 KPAIR="$(xray x25519)"
-PRIV="$(printf '%s\n' "$KPAIR" | awk '/Private/{print $3}')"
-PBK="$(printf '%s\n' "$KPAIR" | awk '/Public/{print $3}')"
+# xray >= 1.8.6 prints "Private key: / Public key:", xray >= 25 prints
+# "PrivateKey: / Password (PublicKey):" — accept both spellings.
+PRIV="$(printf '%s\n' "$KPAIR" | sed -nE 's/^Private ?[Kk]ey: //p' | head -1)"
+PBK="$(printf '%s\n' "$KPAIR" | sed -nE 's/^(Public ?key|Password \(PublicKey\)): //p' | head -1)"
 SID="$(openssl rand -hex 8)"
 [[ -n "$PRIV" && -n "$PBK" ]] || die "failed to parse 'xray x25519' output"
 
