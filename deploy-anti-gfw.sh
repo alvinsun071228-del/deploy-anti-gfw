@@ -461,6 +461,7 @@ WantedBy=multi-user.target
 EOF
 systemctl daemon-reload
 systemctl enable --now stash-sub >/dev/null
+systemctl restart stash-sub   # pick up the freshly-patched SECRET/PORT/CAP (enable --now won't restart a running instance)
 
 # ---------------------------------------------------------------------------
 # 7. verify + report
